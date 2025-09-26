@@ -19,6 +19,7 @@ jobs:
           # XXX: uv build fails for some reason
           uv tool run hatch build --target wheel
       - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
           gh release create v${TAG} \
