@@ -2,26 +2,40 @@ on:
   push:
     tags:
       - "*"
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Checkout 完整历史和 tags
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # 必须加，不然 notes-from-tag 找不到 tag
+          fetch-depth: 0
+
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
+
       - name: Bundle
         run: |
           uv tool run hatch build --target wheel
+
+      # 规范 TAG，保证前缀 v
+      - name: Normalize TAG
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ ^v ]]; then
+            echo "TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          else
+            echo "TAG=v${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
           gh release create ${TAG} \
             --title "yt-dlp-ejs ${TAG}" \
