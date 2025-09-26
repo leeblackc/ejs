@@ -1,13 +1,10 @@
-on:
-  push:
-    tags:
-      - "*"
-
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # 必须加，不然 notes-from-tag 找不到 tag
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
@@ -15,10 +12,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Bundle
-        run:
-          # XXX: uv build fails for some reason
+        run: |
           uv tool run hatch build --target wheel
-      - env:
+      - name: Create GitHub Release
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
