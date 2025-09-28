@@ -1,6 +1,6 @@
 import { type ESTree } from "meriyah";
-import { matchesStructure } from "./utils.ts";
-import { type DeepPartial } from "./types.ts";
+import { matchesStructure } from "../../utils.ts";
+import { type DeepPartial } from "../../types.ts";
 
 const identifier: DeepPartial<ESTree.VariableDeclaration> = {
   type: "VariableDeclaration",
@@ -97,7 +97,8 @@ export function extract(
   }
   const declaration = node.declarations[0];
   if (
-    declaration.type !== "VariableDeclarator" || !declaration.init ||
+    declaration.type !== "VariableDeclarator" ||
+    !declaration.init ||
     declaration.init.type !== "ArrayExpression" ||
     declaration.init.elements.length !== 1
   ) {
