@@ -1,27 +1,15 @@
 name: CI
 on:
   push:
-    paths:
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/release.yml"
-      - "hatch_build.py"
-      - "package.json"
-      - "pyproject.toml"
-      - "rollup.config.js"
-      - "run.ts"
-      - "src/**"
-      - "yt_dlp_ejs/**"
+    branches:
+      - '**'
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
   pull_request:
-    paths:
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/release.yml"
-      - "hatch_build.py"
-      - "package.json"
-      - "pyproject.toml"
-      - "rollup.config.js"
-      - "run.ts"
-      - "src/**"
-      - "yt_dlp_ejs/**"
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
 
 permissions:
   contents: read
@@ -31,8 +19,97 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  ruff-format:
+    name: Ruff format check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: astral-sh/ruff-action@v3
+      with:
+        args: "check --output-format github"
+
+  ruff-lint:
+    name: Ruff linting check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: astral-sh/ruff-action@v3
+      with:
+        args: "format --check --diff"
+
+  prettier:
+    name: Prettier check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Deno v2.x (latest)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Install Deno requirements
+        run: |
+          deno install
+      - name: Run Prettier check
+        run: |
+          deno task fmt:check
+
+  eslint:
+    name: ESLint check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Deno v2.x (latest)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Install Deno requirements
+        run: |
+          deno install
+      - name: Run ESLint check
+        run: |
+          deno task lint
+
+  python_tests:
+    name: Python tests
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', pypy-3.11]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install Deno v2.x (latest)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build project
+        run: |
+          # `pip install -e` omits the force-included JS, so use `build` instead
+          python -m pip install -U build
+          python -m build
+      - name: Unpack wheel (Linux)
+        if: matrix.runner == 'ubuntu-latest'
+        run: |
+          unzip -u dist/yt_dlp_ejs-*.whl "yt_dlp_ejs/*"
+      - name: Unpack wheel (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: pwsh
+        run: |
+          Expand-Archive -Path dist/yt_dlp_ejs-*.whl -DestinationPath ./ -Force
+      - name: Run Python tests
+        timeout-minutes: 5
+        run: |
+          python -Werror -m unittest
+
   prepare:
-    name: Prepare
+    name: Prepare JS runtime tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -58,6 +135,14 @@ jobs:
           path: |
             dist/SHA2-256SUMS
           compression-level: 0
+      - name: Cache player JS files
+        uses: actions/cache@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+        with:
+          path: |
+            src/yt/solver/test/players
+          key: test-player-js-${{ hashFiles('src/yt/solver/test/tests.ts') }}
       - name: Download player JS files
         run: |
           deno run \
@@ -65,6 +150,7 @@ jobs:
             --allow-read=src/yt/solver/test/players/ \
             --allow-write=src/yt/solver/test/players/ \
             --allow-net=www.youtube.com \
+            --allow-sys=uid \
             src/yt/solver/test/download.ts
       - name: Upload player JS artifact
         uses: actions/upload-artifact@v4
@@ -95,6 +181,12 @@ jobs:
       - name: Test Deno build
         run: |
           python -m build
+      - name: Verify artifact contents
+        run: |
+          tar -tvzf dist/yt_dlp_ejs-*.tar.gz
+          unzip -l dist/yt_dlp_ejs-*.whl | tee .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/core\.min\.js' .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/lib\.min\.js' .wheel_contents
       - name: Install Deno requirements
         run: |
           deno install
@@ -156,12 +248,18 @@ jobs:
       - name: Test Bun build
         run: |
           python -m build
+      - name: Verify artifact contents
+        run: |
+          tar -tvzf dist/yt_dlp_ejs-*.tar.gz
+          unzip -l dist/yt_dlp_ejs-*.whl | tee .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/core\.min\.js' .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/lib\.min\.js' .wheel_contents
       - name: Install Bun requirements
         run: |
           bun install
       - name: Bundle with Bun
         run: |
-          bun run bundle
+          bun --bun run bundle
       - name: Download bundle hashes
         uses: actions/download-artifact@v5
         with:
@@ -215,6 +313,12 @@ jobs:
       - name: Test Node build
         run: |
           python -m build
+      - name: Verify artifact contents
+        run: |
+          tar -tvzf dist/yt_dlp_ejs-*.tar.gz
+          unzip -l dist/yt_dlp_ejs-*.whl | tee .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/core\.min\.js' .wheel_contents
+          grep -q 'yt_dlp_ejs/yt/solver/lib\.min\.js' .wheel_contents
       - name: Install Node requirements
         run: |
           npm install
@@ -254,7 +358,18 @@ jobs:
           node --test
 
   all_passed:
-    needs: [deno_build, deno_tests, bun_build, bun_tests, node_build, node_tests]
+    needs:
+      - ruff-format
+      - ruff-lint
+      - prettier
+      - eslint
+      - python_tests
+      - deno_build
+      - deno_tests
+      - bun_build
+      - bun_tests
+      - node_build
+      - node_tests
     runs-on: ubuntu-latest
     steps:
       - name: All checks passed
